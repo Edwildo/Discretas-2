@@ -1,8 +1,9 @@
-import { Router } from 'express';
-import { getChatResponse} from '../controllers/chatbotController.js';
+const express = require('express');
+const rsaControllers = require('../controllers/RSA.controllers');
 
-const router = Router();
+const router = express.Router();
 
-router.get('/', getChatResponse.chat);
+router.post('/encrypt', rsaControllers.encrypt);
+router.post('/decrypt', rsaControllers.decrypt);
 
-export default router;
+module.exports = router;
