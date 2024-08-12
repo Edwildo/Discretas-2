@@ -3,7 +3,8 @@ const rsaControllers = require('../controllers/RSA.controllers');
 
 const router = express.Router();
 
-router.post('/encrypt', rsaControllers.encrypt);
-router.post('/decrypt', rsaControllers.decrypt);
+router.post('/encrypt', rsaControllers.createUser);
+router.post('/decrypt', rsaControllers.decryptPassword);
+router.post('/secret', rsaControllers.addSecret);
 
 module.exports = router;
