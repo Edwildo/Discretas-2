@@ -1,92 +1,127 @@
-const bigInt = require('big-integer');
-const User = require('../models/user.model')
-const millerRabinTest = require('../controllers/Miller-robbin.controller')
+const forge = require('node-forge');
+const rsaController = {};
+const User = require('../models/user.model');
+const { connectToDatabase, closeConnection } = require('../config/dbConfig');
 
-export const newUser = {
-  createUser: (req, res) =>{
-    const newUser = new User(req.body.params, '');
-    newUser.password = '';
-  }
-}
+rsaController.createUser = async (req, res) => {
+  try {
+    const { name, document, password, secret } = req.body;
 
-// Función para generar un número primo grande
-function generateLargePrime(bits) {
-  const min = bigInt(2).pow(bits - 1);
-  const max = bigInt(2).pow(bits).subtract(1);
-
-  while (true) {
-    const p = bigInt.randBetween(min, max);
-    if (p.isProbablePrime(256)) {
-      return p;
+    if (!name || !document || !password || !secret) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    const keyPair = forge.pki.rsa.generateKeyPair(2048);
+    const publicKey = forge.pki.publicKeyToPem(keyPair.publicKey).replace(/\r?\n|\r/g, '');
+    const privateKey = forge.pki.privateKeyToPem(keyPair.privateKey).replace(/\r?\n|\r/g, '');
+
+    const encryptedPassword = forge.pki.publicKeyFromPem(publicKey).encrypt(password, 'RSA-OAEP', {
+      md: forge.md.sha256.create(),
+      mgf1: {
+        md: forge.md.sha256.create(),
+      },
+    });
+    const encodedPassword = forge.util.encode64(encryptedPassword);
+
+    await connectToDatabase();
+
+    const newUser = new User({
+      name,
+      document,
+      password: encodedPassword,
+      secret,
+      publicKey,
+      privateKey,
+    });
+
+    await newUser.save();
+
+    const user = await User.findById(newUser._id).select('-password -privateKey');
+
+    await closeConnection();
+
+    res.status(201).json({ message: 'User created successfully', user });
+  } catch (err) {
+    console.error('User creation error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-}
+};
 
-// Función para calcular el máximo común divisor
-function gcd(a, b) {
-  if (b.equals(0)) {
-    return a;
+rsaController.decryptPassword = async (req, res) => {
+  try {
+    const { document, password } = req.body;
+
+    if (!document || !password) {
+      return res.status(400).json({ error: 'Document and password are required' });
+    }
+
+    await connectToDatabase();
+
+    const user = await User.findOne({ document });
+    if (!user) {
+      await closeConnection();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const decodedPassword = forge.util.decode64(user.password);
+    const decryptedPassword = forge.pki.privateKeyFromPem(user.privateKey).decrypt(decodedPassword, 'RSA-OAEP', {
+      md: forge.md.sha256.create(),
+      mgf1: {
+        md: forge.md.sha256.create(),
+      },
+    });
+
+    await closeConnection();
+
+    if (decryptedPassword === password) {
+      return res.status(200).json({ secrets: user.secrets });
+    } else {
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+  } catch (err) {
+    console.error('Decryption error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  return gcd(b, a.mod(b));
-}
+};
 
-// Función para calcular el inverso modular
-function modInverse(e, phi) {
-  let [g, x] = extendedGcd(e, phi);
-  if (!g.equals(1)) {
-    throw new Error("No modular inverse exists");
+rsaController.addSecret = async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { document, password, newSecret } = req.body;
+
+    if (!document || !password || !newSecret) {
+      return res.status(400).json({ error: 'Document, password, and newSecret are required' });
+    }
+
+    const user = await User.findOne({ document });
+    if (!user) {
+      await closeConnection();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const decodedPassword = forge.util.decode64(user.password);
+    const decryptedPassword = forge.pki.privateKeyFromPem(user.privateKey).decrypt(decodedPassword, 'RSA-OAEP', {
+      md: forge.md.sha256.create(),
+      mgf1: {
+        md: forge.md.sha256.create(),
+      },
+    });
+
+    if (decryptedPassword !== password) {
+      await closeConnection();
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    user.secrets.push(newSecret);
+
+    await user.save();
+    await closeConnection();
+
+    res.status(200).json({ message: 'Secret added successfully', secrets: user.secrets });
+  } catch (err) {
+    console.error('Add secret error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  return x.mod(phi);
-}
+};
 
-// Función para el algoritmo extendido de Euclides
-function extendedGcd(a, b) {
-  if (b.equals(0)) {
-    return [a, bigInt(1), bigInt(0)];
-  }
-  const [g, x1, y1] = extendedGcd(b, a.mod(b));
-  const x = y1;
-  const y = x1.subtract(a.divide(b).multiply(y1));
-  return [g, x, y];
-}
-
-// Función para generar claves RSA
-function generateKeys(bits) {
-  const p = generateLargePrime(bits / 2);
-  const q = generateLargePrime(bits / 2);
-  const n = p.multiply(q);
-  const phi = p.subtract(1).multiply(q.subtract(1));
-
-  let e = bigInt(65537); // Valor comúnmente usado para e
-  while (gcd(e, phi).notEquals(1)) {
-    e = e.add(2);
-  }
-
-  const d = modInverse(e, phi);
-  return {
-    publicKey: { e, n },
-    privateKey: { d, n }
-  };
-}
-
-// Función para cifrar un mensaje
-function encrypt(message, publicKey) {
-  const m = bigInt(message);
-  return m.modPow(publicKey.e, publicKey.n);
-}
-
-// Función para descifrar un mensaje
-function decrypt(encryptedMessage, privateKey) {
-  return encryptedMessage.modPow(privateKey.d, privateKey.n);
-}
-
-// Ejemplo de uso
-const { publicKey, privateKey } = generateKeys(512);
-
-const message = "123456"; // Mensaje a cifrar
-const encryptedMessage = encrypt(message, publicKey);
-const decryptedMessage = decrypt(encryptedMessage, privateKey);
-
-console.log("Mensaje original:", message);
-console.log("Mensaje cifrado:", encryptedMessage.toString());
-console.log("Mensaje descifrado:", decryptedMessage.toString());
+module.exports = rsaController;

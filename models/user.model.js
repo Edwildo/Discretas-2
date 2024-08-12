@@ -1,28 +1,35 @@
-export class User {
-    constructor(name, document, password) {
-      this.name = name;
-      this.document = document;
-      this.password = password;
-    }
-  
-    getNombre() {
-      return this.name;
-    }
+const mongoose = require('mongoose');
 
-    setNombre(name) {
-      this.name = name;
+// Definir el esquema de usuario
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  document: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  secrets: [
+    {
+      type: String,
+      required: true,
     }
-  
-    getDocumento() {
-      return this.document;
-    }
-  
-    setDocumento(document) {
-      this.document = document;
-    }
-  
-    imprimirInformacion() {
-      console.log(`Nombre: ${this.name}, Documento: ${this.document}`);
-    }
+  ],
+  publicKey: {
+    type: String,
+  },
+  privateKey: {
+    type: String, 
   }
-  
+});
+
+// Crear el modelo de usuario basado en el esquema
+const User = mongoose.model('User', userSchema);
+
+module.exports = User;
